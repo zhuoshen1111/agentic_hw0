@@ -132,6 +132,10 @@ def validate_order_by_hand(raw: str) -> tuple[dict | None, str | None]:
     # Right now nothing enforces that, which is why two replies below are
     # currently marked ESCAPED.
     #
+    if quantity < 1:
+        return None, "quantity must be at least 1"
+    if quantity > 20:
+        return None, "quantity must be at most 20"
     # Add checks that return (None, reason) when `quantity` is below 1 or above
     # 20. Write reasons that state the limit, so that a person -- or an AI model
     # trying again -- can tell what went wrong.
@@ -146,7 +150,9 @@ def validate_order_by_hand(raw: str) -> tuple[dict | None, str | None]:
     # A field you did not ask for is a signal that something is wrong, not a
     # harmless extra. Compare the keys in `data` against REQUIRED_KEYS. If there
     # are any others, return (None, reason) and name them in the reason.
-    #
+    extra_keys = set(data) - set(REQUIRED_KEYS)
+    if extra_keys:
+        return None, f"unexpected fields: {', '.join(sorted(extra_keys))}"
     # Hint: `set(data)` gives you the keys of a dict as a set.
 
     # Every check passed. Build a clean dict from the values we verified, rather

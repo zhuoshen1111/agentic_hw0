@@ -1,6 +1,7 @@
 """
 EE 599 -- HW 0, Part 4: The Gate  (about 15 minutes)
-
+AI 模型本身不能直接执行 Python 函数。它只能提出“我想调用哪个工具、参数是什么”。
+真正决定是否执行的是你编写的 host，也就是 Part 4 的 gate。
 This is the part the rest of the course is built on. Everything in Parts 1
 through 3 was preparation for these twenty lines.
 
@@ -30,6 +31,24 @@ ordinary Python that you write and control. The model is not part of it.
 
 Every untrusted thing arrives at step 1 and 2. That is why validation belongs
 there, and not scattered through the tool itself.
+
+MODEL_TURNS
+    ↓
+取出 tool name 和 arguments
+    ↓
+handle_tool_call(name, arguments)
+    ↓
+① 检查工具名是否在 ALLOWED_TOOLS
+    ↓
+② 用 DeliveryOrder 验证参数
+    ↓
+③ 调用 send_to_kitchen()
+    ↓
+④ 将成功结果包装成 OrderResult
+    ↓
+返回 OrderResult 或 ToolError
+    ↓
+放进 transcript
 
 WHY EVERY PATH MUST RETURN A VALUE
 
@@ -96,8 +115,13 @@ _ORDER_COUNTER = [1000]
 #
 # Set model_config = ConfigDict(extra="forbid"), as in Part 2.
 class OrderResult(BaseModel):
-    ...  # <-- your code here (TODO 8)
-
+    order_id: str
+    item: str
+    quantity: int
+    total_usd: float = Field(ge=0)
+    eta_minutes: int = Field(ge=0)
+    status: Literal["confirmed"] = "confirmed"
+    model_config = ConfigDict(extra="forbid")
 
 def handle_tool_call(name: str, arguments: dict[str, Any]) -> OrderResult | ToolError:
     """Decide whether a tool call happens, and report what happened.
@@ -148,7 +172,41 @@ def handle_tool_call(name: str, arguments: dict[str, Any]) -> OrderResult | Tool
     #
     #      MENU[order.item] cannot raise KeyError here. Ask yourself why not,
     #      and which line earned you that guarantee.
-    raise NotImplementedError("TODO 9 -- see the comment above")
+    if name not in ALLOWED_TOOLS:
+        return ToolError(
+            code="unknown_tool",
+            message=f"tool {name!r} is not allowed",
+            fields=[],
+            retryable=False,
+        )
+
+    try:
+        order = DeliveryOrder.model_validate(arguments)
+    except ValidationError as exc:
+        return to_tool_error(exc)
+
+    try:
+        send_to_kitchen(
+            order.item,
+            order.quantity,
+            order.spice,
+            order.notes,
+        )
+    except Exception:
+        return ToolError(
+            code="kitchen_failure",
+            message="the kitchen could not complete the order",
+            fields=[],
+            retryable=False,
+        )
+
+    return OrderResult(
+        order_id=f"ORD-{next_order_id()}",
+        item=order.item,
+        quantity=order.quantity,
+        total_usd=MENU[order.item] * order.quantity,
+        eta_minutes=10 + order.quantity,
+    )
 
 
 def next_order_id() -> int:

@@ -19,13 +19,13 @@ different, they are configured differently, and each one catches things the
 other two do not:
 
     strict=True         Controls conversion. Is the text "3" allowed to become
-                        the number 3, or is that a mistake worth reporting?
+                        the number 3, or is that a mistake worth reporting? 控制类型转换
 
     Field(ge=1, le=20)  Controls the range of allowed values. 0 is a perfectly
-                        good integer, but it is not a quantity we will cook.
+                        good integer, but it is not a quantity we will cook.  控制数值范围
 
     extra="forbid"      Controls which field names are allowed at all. Without
-                        it, Pydantic ignores fields you did not ask for.
+                        it, Pydantic ignores fields you did not ask for.  控制字段名称
 
 HOW TO RUN IT
 
@@ -88,6 +88,11 @@ from taqueria import (
 #   text "3" will no longer be quietly accepted as the number 3.
 class BurritoOrder(BaseModel):
     ...  # <-- your code here (TODO 3)
+    item: Literal["burrito", "taco", "bowl"]
+    quantity: int = Field(ge=1, le=20)
+    spice: Literal["mild", "medium", "hot"]
+    notes: str = Field(default="", max_length=200)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 def parse_order(raw: str) -> tuple[BurritoOrder | None, str | None]:
@@ -119,8 +124,13 @@ def parse_order(raw: str) -> tuple[BurritoOrder | None, str | None]:
     # When the data does not fit, Pydantic raises pydantic.ValidationError.
     # Catch it and return the reason as a string instead of letting the
     # exception travel further up. `first_error` below turns a ValidationError
-    # into one short line for you.
-    raise NotImplementedError("TODO 4 -- see the comment above")
+    # into one short line for you.r
+    # #raise NotImplementedError("TODO 4 -- see the comment above")
+    try:
+        order = BurritoOrder.model_validate_json(raw)
+        return order, None
+    except ValidationError as exc:
+        return None, first_error(exc)
 
 
 def first_error(exc: ValidationError) -> str:

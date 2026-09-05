@@ -110,7 +110,7 @@ def ask_codex_live(request: str, previous_error: str | None = None) -> str:
 
         completed = subprocess.run(
             [
-                "codex", "exec",
+                "codex.cmd", "exec",
                 # Do not require the current folder to be a git repository.
                 "--skip-git-repo-check",
                 # Do not save a session file for this run.
@@ -199,7 +199,21 @@ def structured_request(
     # costs money and time, and a model that is wrong twice in the same way is
     # usually not one attempt away from being right. Real agents set a retry
     # limit for exactly this reason.
-    raise NotImplementedError("TODO 10 -- see the comment above")
+    raw = ask(request)
+
+    try:
+        order = BurritoOrder.model_validate_json(raw)
+        return order, None, 1
+    except ValidationError as exc:
+        err = to_tool_error(exc)
+
+    raw = ask(request, err.message)
+
+    try:
+        order = BurritoOrder.model_validate_json(raw)
+        return order, None, 2
+    except ValidationError as exc:
+        return None, to_tool_error(exc), 2
 
 
 def main() -> None:

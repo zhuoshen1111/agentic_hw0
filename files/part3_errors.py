@@ -8,6 +8,8 @@ First, some rules are about meaning rather than shape. "Eve Hall" and "the Moon"
 are both strings of text. Only one of them is a place this taqueria delivers to.
 No type annotation can tell them apart, so you write a small function and attach
 it to the field. Pydantic calls these validators.
+类型注解 str 无法表达“这个字符串必须是某个真实配送地点”，
+因此需要 validator。
 
 Second, something has to happen after a rejection. In an ordinary program you
 might raise an exception and let it crash. In an agent that is usually wrong,
@@ -44,7 +46,7 @@ from part2_after import BurritoOrder
 from taqueria import DELIVERY_ZONE, accepted, banner, rejected
 
 
-class DeliveryOrder(BurritoOrder):
+class DeliveryOrder(BurritoOrder): #AI 希望执行的订单参数
     """A BurritoOrder that also has to get somewhere.
 
     This class inherits from the model you wrote in Part 2, so every rule you
@@ -80,6 +82,7 @@ class DeliveryOrder(BurritoOrder):
     #   1. return None unchanged, because a pickup order has no address and
     #      that is perfectly legal
     #   2. remove leading and trailing whitespace with .strip()
+    #      它会去掉字符串开头和结尾的空格
     #   3. raise ValueError if the lowercased address is not in DELIVERY_ZONE.
     #      Include the words "delivery zone" in the message; a later function
     #      looks for that phrase.
@@ -89,7 +92,18 @@ class DeliveryOrder(BurritoOrder):
     # ValueError and reports it in the same list as everything else it found,
     # so one bad request produces one complete report rather than a series of
     # one-problem-at-a-time failures.
-    ...  # <-- your code here (TODO 5)
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        stripped = value.strip()
+
+        if stripped.lower() not in DELIVERY_ZONE:
+            raise ValueError("address is outside the delivery zone")
+
+        return stripped  # <-- your code here (TODO 5)
 
     # TODO 6: Write a validator for a rule that involves two fields at once.
     #
@@ -114,13 +128,21 @@ class DeliveryOrder(BurritoOrder):
     # The second one matters as much as the first. An address on a pickup order
     # means the model misunderstood the request, and a system that silently
     # ignores the extra information will deliver nothing and explain nothing.
-    ...  # <-- your code here (TODO 6)
+    @model_validator(mode="after")
+    def validate_fulfillment_and_address(self) -> "DeliveryOrder":
+        if self.fulfillment == "delivery" and self.address is None:
+            raise ValueError("a delivery order requires an address")
+
+        if self.fulfillment == "pickup" and self.address is not None:
+            raise ValueError("a pickup order must not include an address")
+
+        return self  # <-- your code here (TODO 6)
 
 
 # --- Giving failure a shape --------------------------------------------------
 
 
-class ToolError(BaseModel):
+class ToolError(BaseModel): #程序拒绝工具调用后，准备反馈给 AI 的错误
     """What the program produces when a tool call does not happen.
 
     An agent loop is the cycle of: send the conversation to the model, read what
@@ -156,6 +178,7 @@ class ToolError(BaseModel):
 
 def to_tool_error(exc: ValidationError) -> ToolError:
     """Convert a ValidationError into something safe to send back to the model."""
+
     # TODO 7: Build and return the ToolError.
     #
     # `exc.errors()` returns a list of dictionaries, one per problem, each with
@@ -179,7 +202,38 @@ def to_tool_error(exc: ValidationError) -> ToolError:
     #              unbounded error message is an unbounded bill.
     #
     #   retryable  True. A model can usually correct its own arguments.
-    raise NotImplementedError("TODO 7 -- see the comment above")
+    #
+    errors = exc.errors()
+
+    fields = sorted(
+        {
+            str(error["loc"][0])
+            for error in errors
+            if error["loc"]
+        }
+    )
+
+    code = (
+        "outside_delivery_zone"
+        if any("delivery zone" in error["msg"] for error in errors)
+        else "invalid_arguments"
+    )
+
+    details = []
+    for error in errors:
+        location = ".".join(str(part) for part in error["loc"]) or "<body>"
+        details.append(f"{location}: {error['msg']}")
+
+    message = (
+        f"{len(fields)} field(s) rejected: {'; '.join(details)}"
+    )[:200]
+
+    return ToolError(
+        code=code,
+        message=message,
+        fields=fields,
+        retryable=True,
+    )
 
 
 # --- Six more replies, this time about delivery ------------------------------
